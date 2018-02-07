@@ -1,0 +1,132 @@
+From 4441a411ca1c932e3fec1c87a9463fd0725c666d Mon Sep 17 00:00:00 2001
+From: Mario Rodas <marsam@users.noreply.github.com>
+Date: Tue, 21 Jun 2016 20:41:11 -0500
+Subject: [PATCH] Add tramp support
+
+---
+ sudo-edit-test.el | 51 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ sudo-edit.el      | 48 ++++++++++++++++++++++++++++++++++++------------
+ 2 files changed, 87 insertions(+), 12 deletions(-)
+ create mode 100644 sudo-edit-test.el
+
+diff --git a/sudo-edit-test.el b/sudo-edit-test.el
+new file mode 100644
+index 0000000..19bc122
+--- /dev/null
++++ b/sudo-edit-test.el
+@@ -0,0 +1,51 @@
++;;; sudo-edit-test.el --- sudo-edit: Unit test suite  -*- lexical-binding: t -*-
++
++;; Copyright (c) 2016 Mario Rodas <marsam@users.noreply.github.com>
++
++;; Author: Mario Rodas <marsam@users.noreply.github.com>
++;; Version: 0.0.1
++;; Package-Requires: ((emacs "24.3"))
++
++;; This file is NOT part of GNU Emacs.
++
++;;; License:
++
++;; This program is free software: you can redistribute it and/or modify
++;; it under the terms of the GNU General Public License as published by
++;; the Free Software Foundation, either version 3 of the License, or
++;; (at your option) any later version.
++
++;; This program is distributed in the hope that it will be useful,
++;; but WITHOUT ANY WARRANTY; without even the implied warranty of
++;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++;; GNU General Public License for more details.
++
++;; You should have received a copy of the GNU General Public License
++;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++;;; Commentary:
++
++;; The unit test suite of sudo-edit
++
++;;; Code:
++
++(require 'sudo-edit)
++(require 'undercover nil t)
++
++(when (fboundp 'undercover)
++  (undercover "sudo-edit.el"))
++
++(ert-deftest sudo-edit-basic-test ()
++  ;; local files
++  (should (equal (sudo-edit-filename "example.txt")
++                 "/sudo::example.txt"))
++  ;; remote files
++  (should (equal (sudo-edit-filename "/ssh:machine:example.txt")
++                 "/ssh:machine|sudo:machine:example.txt"))
++  ;; tramp multi-hops files
++  (should (equal (sudo-edit-filename "/ssh:machine1|ssh:machine2:example.txt")
++                 "/ssh:machine1|ssh:machine2|sudo:machine2:example.txt")))
++
++(provide 'sudo-edit-test)
++
++;;; sudo-edit-test.el ends here
+diff --git a/sudo-edit.el b/sudo-edit.el
+index fe72d33..83af42e 100644
+--- a/sudo-edit.el
++++ b/sudo-edit.el
+@@ -41,20 +41,44 @@
+ ;; Boston, MA 02110-1301, USA.
+ 
+ ;;; Code:
++(eval-when-compile
++  (require 'subr-x))
+ 
++(require 'tramp)
++
++(defun sudo-edit-filename (file-name)
++  "Return a sudo edit name for a FILE-NAME."
++  (if (file-remote-p file-name)
++      (let* ((vec (tramp-dissect-file-name file-name))
++             (hop (tramp-make-tramp-file-name
++                   (tramp-file-name-method vec)
++                   (tramp-file-name-user vec)
++                   (tramp-file-name-host vec)
++                   ""
++                   (tramp-file-name-hop vec))))
++        (setq hop (string-remove-prefix tramp-prefix-format hop))
++        (setq hop (string-remove-suffix tramp-postfix-host-format hop))
++        (setq hop (concat hop tramp-postfix-hop-format))
++        (tramp-make-tramp-file-name
++         "sudo"
++         ""
++         (tramp-file-name-host vec)
++         (tramp-file-name-localname vec)
++         hop))
++    (concat "/sudo::" file-name)))
++
++;;;###autoload
+ (defun sudo-edit (&optional arg)
+-  "Find a file and open it as root."
+-  (interactive "p")
+-  (if arg
+-      (find-file (concat "/sudo:root@localhost:" (read-file-name "File: ")))
+-    (find-alternate-file (concat "/sudo:root@localhost:" buffer-file-name))))
+-
+-(defun sudo-edit-current-file ()
+-  "Edit the current file as root."
+-  (interactive)
+-  (let ((pos (point)))
+-    (find-alternate-file (concat "/sudo:root@localhost:" (buffer-file-name (current-buffer))))
+-    (goto-char pos)))
++  "Edit currently visited file as root.
++
++With a prefix ARG prompt for a file to visit.  Will also prompt
++for a file to visit if current buffer is not visiting a file."
++  (interactive "P")
++  (if (or arg (not buffer-file-name))
++      (find-file (sudo-edit-filename (read-file-name "Find file(as root): ")))
++    (let ((position (point)))
++      (find-alternate-file (sudo-edit-filename buffer-file-name))
++      (goto-char position))))
+ 
+ (provide 'sudo-edit)
+ ;;; sudo-edit.el ends here
+--
+Working Copy 3.2.6
+
